@@ -1,12 +1,13 @@
 # app.R
-# NYPD Hate Crimes — Full revision (full 16-trial design)
+# NYPD Hate Crimes — Side-by-side with taller graph column
 # - 2 timed performance (MAX, MIN) per chart (scored)
-# - 2 perception (clarity, confidence) per chart (untimed)
-# - 4 charts => 16 trials, then preference (single choice)
+# - 1 perception (confidence 1-5) per chart (untimed)
+# - 4 charts => 12 trials, then preference (single choice)
 # - Same preset year per participant (deterministic from PID)
 # - Per-question timeout (later::later), auto-advance after answer (0.5s)
 # - Single-click answer protection, hidden scoring for participants
 # - Researcher download includes time + correctness + timeout flag
+# - Left (graph) column taller than right (question) column; both equal width
 
 library(shiny)
 library(readxl)
@@ -72,23 +73,18 @@ make_choices <- function(counts, correct_label, k = 4, seed = 490) {
   labels <- unique(as.character(counts$offense_category))
   labels <- labels[!is.na(labels) & labels != ""]
   if (length(labels) == 0) return(character(0))
-
   if (!(correct_label %in% labels)) correct_label <- labels[1]
   set.seed(seed + nchar(correct_label))
-
   others <- setdiff(labels, correct_label)
   if (length(others) == 0) return(correct_label)
-
   n_distractors <- min(k - 1, length(others))
   distractors <- sample(others, n_distractors, replace = FALSE)
   choices <- unique(c(correct_label, distractors))
-
   while (length(choices) < min(k, length(labels))) {
     remaining <- setdiff(labels, choices)
     if (length(remaining) == 0) break
     choices <- c(choices, sample(remaining, 1))
   }
-
   if (length(choices) > 1) choices <- sample(choices, length(choices))
   choices
 }
@@ -97,14 +93,13 @@ get_correct_answer <- function(counts, task_type) {
   if (nrow(counts) == 0) return(NA_character_)
   if (task_type == "MAX") return(counts$offense_category[which.max(counts$n)][1])
   if (task_type == "MIN") return(counts$offense_category[which.min(counts$n)][1])
-  # fallback: unknown task type -> return NA (fail loudly)
   return(NA_character_)
 }
 
 task_text <- function(task_type) {
   if (task_type == "MAX") return("highest")
   if (task_type == "MIN") return("lowest")
-  "second-highest"
+  "unknown"
 }
 
 pretty_chart_name <- function(x) {
@@ -116,7 +111,7 @@ pretty_chart_name <- function(x) {
          "Chart")
 }
 
-# Full plan: per chart (random order per participant) => performance MAX, MIN then perception Clarity, Confidence
+# Full plan: per chart (random order per participant) => performance MAX, MIN then one perception (Confidence)
 make_full_plan <- function(one_year, seed = 490) {
   charts <- c("treemap", "bar", "stack", "line")
   set.seed(seed)
@@ -125,8 +120,8 @@ make_full_plan <- function(one_year, seed = 490) {
   for (ch in charts_order) {
     rows[[idx]] <- tibble(trial_idx = idx, phase = "performance", chart = ch, year = as.integer(one_year), task_type = "MAX", perc_q = NA_integer_); idx <- idx + 1
     rows[[idx]] <- tibble(trial_idx = idx, phase = "performance", chart = ch, year = as.integer(one_year), task_type = "MIN", perc_q = NA_integer_); idx <- idx + 1
+    # single perception question: Confidence (1-5)
     rows[[idx]] <- tibble(trial_idx = idx, phase = "perception", chart = ch, year = as.integer(one_year), task_type = NA_character_, perc_q = 1L); idx <- idx + 1
-    rows[[idx]] <- tibble(trial_idx = idx, phase = "perception", chart = ch, year = as.integer(one_year), task_type = NA_character_, perc_q = 2L); idx <- idx + 1
   }
   bind_rows(rows)
 }
@@ -179,14 +174,23 @@ ui <- fluidPage(
   tags$head(
     tags$style(HTML("
       body { background: #ffffff; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial; }
-      .app-wrap { max-width: 1150px; margin: 0 auto; padding: 10px; }
+      /* make the overall app wider so left+right can be visibly larger */
+      .app-wrap { max-width: 1500px; margin: 0 auto; padding: 10px; }
       .big-title { font-size: 28px; font-weight: 700; margin: 6px 0; }
       .subtle { color: #666; }
       .card { border: 1px solid #e5e5e5; border-radius: 10px; padding: 14px; background: #fafafa; }
-      .plot-box { border: 1px solid #eee; border-radius: 10px; padding: 6px; background: #fff; }
-      .plot-height { height: 66vh; }
+      /* container for side-by-side */
+      .plot-container { display:flex; gap:18px; align-items:flex-start; }
+      /* equal widths: both take 50% of available width */
+      .plot-box { flex: 1 1 50%; border: 1px solid #eee; border-radius: 10px; padding: 8px; background: #fff; min-width: 300px; }
+      .question-box { flex: 1 1 50%; border: 1px solid #e5e5e5; border-radius: 10px; padding: 14px; background: #fafafa; min-width: 300px; }
+      /* ===== HEIGHTS: tweak these values to change relative heights =====
+         The plot-box is taller; the question-box is shorter.
+         You can edit 82vh and 56vh below to the values you want. */
+      .plot-height { height: 62vh; }    /* Taller graph column */
+      .question-height { height: 34vh; } /* Shorter question column */
       .plot-height .plotly { height: 100% !important; }
-      .question-box { border: 1px solid #e5e5e5; border-radius: 10px; padding: 12px; background: #fafafa; }
+      .question-box { overflow: auto; }
       .question-text { font-size: 17px; font-weight: 700; margin-bottom: 8px; }
       .countdown { font-size: 56px; font-weight: 800; text-align: center; padding: 20px; }
       .btn-grid { display:grid; grid-template-columns: repeat(2, 1fr); gap:10px; }
@@ -209,7 +213,7 @@ ui <- fluidPage(
       div(class = "topbar",
           div(
             div(class = "big-title", "NYPD Hate Crimes — Visualization Speed Test"),
-            div(class = "subtle", "Per chart: 2 timed performance questions then 2 perception questions.")
+            div(class = "subtle", "Per chart: 2 timed performance questions then 1 perception (confidence) question.")
           ),
           div(class = "card",
               textInput("pid", "Participant ID", value = "P01"),
@@ -284,7 +288,7 @@ server <- function(input, output, session) {
           h4("Instructions"),
           tags$ul(
             tags$li("For each visualization you'll answer two timed performance questions (highest, lowest)."),
-            tags$li("After those, you'll answer two perception questions: clarity (1–5) and confidence (1–5)."),
+            tags$li("After those, you'll answer one perception question: confidence (1–5)."),
             tags$li("Clicking an answer for performance questions logs time & correctness and auto-advances."),
             tags$li("Perception questions are untimed; click a rating to continue."),
             tags$li(sprintf("Timed trials have a %d second limit.", PERFORMANCE_TIMEOUT))
@@ -298,9 +302,10 @@ server <- function(input, output, session) {
     } else if (rv$screen == "countdown") {
       div(class = "card", div(id = "countdown_text", class = "countdown", ""))
     } else if (rv$screen == "quiz") {
-      div(class = "quiz-layout",
+      # side-by-side layout: equal width columns; plot column taller (class plot-height)
+      div(class = "plot-container",
           div(class = "plot-box plot-height", plotlyOutput("quiz_plot", height = "100%")),
-          div(class = "question-box",
+          div(class = "question-box question-height",
               div(class = "question-text", textOutput("task_prompt")),
               uiOutput("answer_ui"),
               div(style = "margin-top:8px;", actionButton("back_home", "Quit / Home"))
@@ -317,6 +322,12 @@ server <- function(input, output, session) {
               actionButton("pref_line", "Line Graph", class = "p4")
           )
       )
+    } else if (rv$screen == "done") {
+      div(class = "card",
+          h3("Done — thank you!"),
+          p("You can close this tab or restart to collect data for another participant."),
+          actionButton("restart", "Restart / New participant")
+      )
     } else {
       div(class = "card", h3("Done — thank you!"), p("You can close this tab."))
     }
@@ -325,9 +336,9 @@ server <- function(input, output, session) {
   #### Start flow: build plan and countdown ####
   observeEvent(input$begin, {
     # set participant year and plan deterministically from PID
-    py <- pick_year_for_pid(input$pid, years)
+    py <- pick_year_for_pid(isolate(input$pid), years)
     rv$participant_year <- py
-    seed_val <- 490 + sum(utf8ToInt(str_trim(input$pid)))
+    seed_val <- 490 + sum(utf8ToInt(str_trim(isolate(input$pid))))
     rv$plan <- make_full_plan(py, seed = seed_val)
     rv$idx <- 0
     rv$chart <- NA_character_; rv$story_year <- NA_integer_; rv$task_type <- NA_character_
@@ -369,7 +380,7 @@ server <- function(input, output, session) {
       if (nrow(counts) < 2) {
         # log skip and go next
         rv$log <- bind_rows(rv$log, tibble(
-          participant = str_trim(input$pid),
+          participant = str_trim(isolate(input$pid)),
           trial_kind = "performance",
           chart = rv$chart, year = rv$story_year, trial_idx = rv$idx,
           task_type = ttype, correct_answer = NA_character_, submitted = NA_character_,
@@ -383,21 +394,21 @@ server <- function(input, output, session) {
       rv$task_type <- ttype
       rv$choices <- choices
       rv$start_time <- Sys.time()
-      # snapshot local values for later callback
+
+      # ---- Capture locals before scheduling later() ----
       local_start <- rv$start_time
       local_idx <- rv$idx
       local_chart <- rv$chart
       local_year <- rv$story_year
       local_task <- rv$task_type
+      local_pid <- str_trim(isolate(input$pid))
 
       # schedule timeout check (PERFORMANCE_TIMEOUT seconds) using later()
       later::later(function() {
-        # use isolate() to read reactive values safely inside later callback
         if (!is.null(isolate(rv$start_time)) && identical(isolate(rv$start_time), local_start) && !isolate(rv$answered)) {
-          # log as timeout (seconds = PERFORMANCE_TIMEOUT, correct = FALSE)
           rv$log <- bind_rows(isolate(rv$log),
                               tibble(
-                                participant = str_trim(input$pid),
+                                participant = local_pid,
                                 trial_kind = "performance",
                                 chart = local_chart,
                                 year = local_year,
@@ -411,10 +422,8 @@ server <- function(input, output, session) {
                                 perc_q = NA_integer_,
                                 survey_question = NA_character_
                               ))
-          # mark as no longer active
           rv$start_time <- NULL
           rv$answered <- TRUE
-          # auto advance
           session$sendCustomMessage("auto_next", list())
         }
       }, delay = PERFORMANCE_TIMEOUT)
@@ -422,18 +431,15 @@ server <- function(input, output, session) {
       rv$prompt <- paste0("[", pretty_chart_name(rv$chart), " — Performance: Q", rv$idx, " of ", nrow(rv$plan), "] ",
                           "In year ", rv$story_year, ", which offense category has the ", task_text(ttype), " number of incidents?")
     } else {
-      # perception trial (untimed)
+      # perception trial (untimed, single question per chart — Confidence)
       perc_q <- as.integer(row$perc_q)
       rv$task_type <- NA_character_
       rv$choices <- NULL
       rv$start_time <- NULL
-      if (perc_q == 1) {
-        rv$prompt <- paste0("[", pretty_chart_name(rv$chart), " — Perception: Q", rv$idx, " of ", nrow(rv$plan), "] ",
-                            "How clear was this visualization for answering the questions? (1 = not clear, 5 = very clear)")
-      } else {
-        rv$prompt <- paste0("[", pretty_chart_name(rv$chart), " — Perception: Q", rv$idx, " of ", nrow(rv$plan), "] ",
-                            "How confident are you in your answers? (1 = not confident, 5 = very confident)")
-      }
+      rv$prompt <- paste0(
+        "[", pretty_chart_name(rv$chart), " — Perception: Q", rv$idx, " of ", nrow(rv$plan), "] ",
+        "How confident are you in your answers? (1 = not confident, 5 = very confident)"
+      )
     }
   }
 
@@ -467,7 +473,6 @@ server <- function(input, output, session) {
 
   # ----- Performance handlers (single-click protected) -----
   handle_perf_click <- function(i) {
-    # ensure trial active and not already answered
     if (is.null(rv$start_time) || rv$answered) return()
     ch <- isolate(rv$choices)
     if (is.null(ch) || length(ch) < i) return()
@@ -477,9 +482,8 @@ server <- function(input, output, session) {
     correct_label <- get_correct_answer(counts, isolate(rv$task_type))
     is_correct <- identical(submitted, correct_label)
 
-    # record log row (timeout = FALSE)
     rv$log <- bind_rows(isolate(rv$log), tibble(
-      participant = str_trim(input$pid),
+      participant = str_trim(isolate(input$pid)),
       trial_kind = "performance",
       chart = isolate(rv$chart),
       year = isolate(rv$story_year),
@@ -494,11 +498,8 @@ server <- function(input, output, session) {
       survey_question = NA_character_
     ))
 
-    # prevent double-logging
     rv$answered <- TRUE
-    # clear start_time
     rv$start_time <- NULL
-    # auto-advance
     session$sendCustomMessage("auto_next", list())
     invisible(TRUE)
   }
@@ -508,15 +509,15 @@ server <- function(input, output, session) {
   observeEvent(input$ans_3, { handle_perf_click(3) }, ignoreInit = TRUE)
   observeEvent(input$ans_4, { handle_perf_click(4) }, ignoreInit = TRUE)
 
-  # ----- Perception handlers (immediate advance) -----
+  # ----- Perception handler (single question per chart) -----
   handle_perc <- function(val) {
     if (is.null(rv$plan) || rv$idx == 0) return()
     row <- rv$plan[rv$idx, ]
     if (row$phase != "perception") return()
-    qtxt <- if (row$perc_q == 1) "Clarity (1-5)" else "Confidence (1-5)"
+    qtxt <- "Confidence (1-5)"
 
     rv$log <- bind_rows(isolate(rv$log), tibble(
-      participant = str_trim(input$pid),
+      participant = str_trim(isolate(input$pid)),
       trial_kind = "perception",
       chart = as.character(row$chart),
       year = as.integer(row$year),
@@ -530,7 +531,6 @@ server <- function(input, output, session) {
       perc_q = as.integer(row$perc_q),
       survey_question = qtxt
     ))
-    # advance to next trial
     session$sendCustomMessage("auto_next", list())
   }
 
@@ -543,7 +543,7 @@ server <- function(input, output, session) {
   # ----- Preference handlers (single choice, then finish) -----
   observeEvent(input$pref_treemap, {
     rv$log <- bind_rows(isolate(rv$log), tibble(
-      participant = str_trim(input$pid), trial_kind = "preference", chart = "Tree Map",
+      participant = str_trim(isolate(input$pid)), trial_kind = "preference", chart = "Tree Map",
       year = rv$participant_year, trial_idx = NA_integer_, task_type = NA_character_, correct_answer = NA_character_,
       submitted = "Tree Map", correct = NA, seconds = NA_real_, timeout = NA, perc_q = NA_integer_, survey_question = "Preference"
     ))
@@ -552,7 +552,7 @@ server <- function(input, output, session) {
 
   observeEvent(input$pref_bar, {
     rv$log <- bind_rows(isolate(rv$log), tibble(
-      participant = str_trim(input$pid), trial_kind = "preference", chart = "Bar Chart",
+      participant = str_trim(isolate(input$pid)), trial_kind = "preference", chart = "Bar Chart",
       year = rv$participant_year, trial_idx = NA_integer_, task_type = NA_character_, correct_answer = NA_character_,
       submitted = "Bar Chart", correct = NA, seconds = NA_real_, timeout = NA, perc_q = NA_integer_, survey_question = "Preference"
     ))
@@ -561,7 +561,7 @@ server <- function(input, output, session) {
 
   observeEvent(input$pref_stack, {
     rv$log <- bind_rows(isolate(rv$log), tibble(
-      participant = str_trim(input$pid), trial_kind = "preference", chart = "Stack Chart",
+      participant = str_trim(isolate(input$pid)), trial_kind = "preference", chart = "Stack Chart",
       year = rv$participant_year, trial_idx = NA_integer_, task_type = NA_character_, correct_answer = NA_character_,
       submitted = "Stack Chart", correct = NA, seconds = NA_real_, timeout = NA, perc_q = NA_integer_, survey_question = "Preference"
     ))
@@ -570,14 +570,30 @@ server <- function(input, output, session) {
 
   observeEvent(input$pref_line, {
     rv$log <- bind_rows(isolate(rv$log), tibble(
-      participant = str_trim(input$pid), trial_kind = "preference", chart = "Line Graph",
+      participant = str_trim(isolate(input$pid)), trial_kind = "preference", chart = "Line Graph",
       year = rv$participant_year, trial_idx = NA_integer_, task_type = NA_character_, correct_answer = NA_character_,
       submitted = "Line Graph", correct = NA, seconds = NA_real_, timeout = NA, perc_q = NA_integer_, survey_question = "Preference"
     ))
     rv$screen <- "done"
   }, ignoreInit = TRUE)
 
-  # Quit/Home
+  # ----- Restart handler (keeps rv$log) -----
+  observeEvent(input$restart, {
+    rv$plan <- NULL
+    rv$idx <- 0
+    rv$participant_year <- NA_integer_
+    rv$chart <- NA_character_
+    rv$story_year <- NA_integer_
+    rv$task_type <- NA_character_
+    rv$choices <- NULL
+    rv$prompt <- ""
+    rv$start_time <- NULL
+    rv$answered <- FALSE
+    rv$screen <- "instructions"
+    # rv$log remains intact for later download
+  }, ignoreInit = TRUE)
+
+  # Quit/Home (also resets but keeps log)
   observeEvent(input$back_home, {
     rv$screen <- "instructions"
     rv$plan <- NULL
@@ -587,12 +603,6 @@ server <- function(input, output, session) {
     rv$prompt <- ""
     rv$start_time <- NULL
     rv$answered <- FALSE
-    rv$log <- tibble(
-      participant = character(), trial_kind = character(), chart = character(),
-      year = integer(), trial_idx = integer(), task_type = character(),
-      correct_answer = character(), submitted = character(), correct = logical(),
-      seconds = numeric(), timeout = logical(), perc_q = integer(), survey_question = character()
-    )
   }, ignoreInit = TRUE)
 
   # Plot output
