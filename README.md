@@ -26,10 +26,16 @@ in the same folder as:
 
 3️⃣ **Run the Application**
 
-In R or RStudio, run :
+In VSCode, run :
+  > R
+
+  then, run :
 
   > shiny::runApp()
 
 Or if you are already inside the project folder, run :
+  > R
+
+  then, run :
 
   > shiny::runApp("app.R")
