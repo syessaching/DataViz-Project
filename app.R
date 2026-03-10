@@ -11,6 +11,7 @@
 # - Visible digital timer (numeric + progress bar) appears below question area on performance trials
 # - Custom performance questions per chart as requested
 # - Data restricted to year 2025 only
+
 library(shiny)
 library(readxl)
 library(dplyr)
@@ -295,33 +296,44 @@ plot_for_year <- function(yr, chart_type, data_df) {
 
   if (chart_type == "bar") {
     p <- plot_ly(counts, x = ~offense_category, y = ~n, type = "bar",
-            hovertemplate = "<b>%{x}</b><br>Incidents: %{y}<extra></extra>")
+                 hovertemplate = "<b>%{x}</b><br>Incidents: %{y}<extra></extra>")
     p %>% layout(title = title_layout$title, margin = title_layout$margin,
                  xaxis = list(title = "offense_category", tickangle = -35, automargin = TRUE),
                  yaxis = list(title = "n", automargin = TRUE)) %>%
       config(displayModeBar = FALSE, responsive = TRUE)
-  } else if (chart_type == "treemap") {
-    nodes <- tibble(ids = as.character(counts$offense_category),
-                    labels = as.character(counts$offense_category),
-                    parents = "", values = counts$n)
 
-    # ===== CHANGE: minimal padding so colored tiles appear larger =====
-    # set marker pad to 0 (no space between tiles) and use squarify packing for denser tiles
+  } else if (chart_type == "treemap") {
+    # --- UPDATED TREEMAP: slightly boost tiny tiles but keep original counts in labels/hover ---
+    # boost amount (increase if you want even bigger tiny tiles)
+    boost <- 5
+
+    nodes <- tibble(
+      ids = as.character(counts$offense_category),
+      labels = as.character(counts$offense_category),
+      parents = "",
+      values_adj = counts$n + boost,    # used for tile area (visual boost)
+      values_raw = counts$n,            # original counts for labeling/hover
+      text = paste0(as.character(counts$offense_category), "\n", counts$n) # label text shows original count
+    )
+
     p <- plot_ly(
       nodes,
       type = "treemap",
       ids = ~ids,
       labels = ~labels,
       parents = ~parents,
-      values = ~values,
-      textinfo = "label+value",
-      hovertemplate = "<b>%{label}</b><br>Incidents: %{value}<extra></extra>",
-      marker = list(pad = list(t = 0, l = 0, r = 0, b = 0)),
+      values = ~values_adj,        # use boosted values for area
+      text = ~text,                # show original counts on the tile
+      customdata = ~values_raw,    # make original count available to hovertemplate
+      textinfo = "text",
+      hovertemplate = "<b>%{label}</b><br>Incidents: %{customdata}<extra></extra>",
+      marker = list(pad = list(t = 1, l = 1, r = 1, b = 1)),
       tiling = list(packing = "squarify")
     )
+
     p %>% layout(title = title_layout$title, margin = title_layout$margin) %>%
       config(displayModeBar = FALSE, responsive = TRUE)
-    # ================================================================
+
   } else if (chart_type == "stack") {
     # make stacked chart horizontal: categories on y, months stack across x
     by_month <- x %>%
@@ -339,9 +351,10 @@ plot_for_year <- function(yr, chart_type, data_df) {
                  xaxis = list(title = "Incidents", automargin = TRUE),
                  yaxis = list(title = "Offense Category", automargin = TRUE, tickangle = 0)) %>%
       config(displayModeBar = FALSE, responsive = TRUE)
+
   } else {
     p <- plot_ly(counts, x = ~offense_category, y = ~n, type = "scatter", mode = "lines+markers",
-            hovertemplate = "<b>%{x}</b><br>Incidents: %{y}<extra></extra>")
+                 hovertemplate = "<b>%{x}</b><br>Incidents: %{y}<extra></extra>")
     p %>% layout(title = title_layout$title, margin = title_layout$margin,
                  xaxis = list(title = "offense_category", tickangle = -35, automargin = TRUE),
                  yaxis = list(title = "n", automargin = TRUE)) %>%
@@ -692,8 +705,7 @@ server <- function(input, output, session) {
       rv$task_type <- NA_character_
       rv$choices <- NULL
       rv$start_time <- NULL
-      rv$prompt <- paste0("[", pretty_chart_name(rv$chart), " — Perception: Q", rv$idx, " of ", nrow(rv$plan), "] ",
-                          "How confident are you in your answers? (1 = not confident, 5 = very confident)")
+      rv$prompt <- paste0("How confident are you in your answers? (1 = not confident, 5 = very confident)")
       # stop any client timer
       session$sendCustomMessage("stop_qtimer", list())
     }
