@@ -358,8 +358,8 @@ ui <- fluidPage(
   div(class = "app-wrap",
       div(class = "topbar",
           div(
-            div(class = "big-title", "NYPD Hate Crimes — Visualization Speed Test"),
-            div(class = "subtle", "Per chart: 2 timed performance questions then 1 perception (confidence) question. Data: 2025 only.")
+            div(class = "big-title", "NYPD Hate Crimes — Categorical Data Visualization Test"),
+            div(class = "subtle", "Per chart: 2 timed performance questions then 1 perception (confidence) question.")
           ),
           div(class = "card",
               textInput("pid", "Participant ID", value = "P01"),
